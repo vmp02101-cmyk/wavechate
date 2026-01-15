@@ -34,6 +34,15 @@ const io = new Server(server, {
 
 let db;
 
+// Root route for health check
+app.get('/', (req, res) => {
+    res.json({
+        status: 'ok',
+        message: 'WaveChat Backend API',
+        version: '1.0.0'
+    });
+});
+
 // Initialize Database before starting server
 initDB().then(database => {
     db = database;
