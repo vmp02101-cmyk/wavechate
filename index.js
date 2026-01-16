@@ -250,7 +250,7 @@ io.on('connection', (socket) => {
                 timestamp: new Date().toISOString()
             };
 
-            const parts = chatId.split('_');
+            const parts = safeChatId.split('_');
             if (parts.length === 2) {
                 const normParts = parts.map(clean);
                 const normReceiver = normParts.find(p => p !== clean(sender));
@@ -258,7 +258,7 @@ io.on('connection', (socket) => {
                 console.log(`🚀 Dispatching Msg to: ${normChatId} AND Receiver: ${normReceiver}`);
 
                 // Emit to rooms
-                io.to(chatId).emit('receive_message', newMessage);
+                io.to(safeChatId).emit('receive_message', newMessage);
                 io.to(`${parts[1]}_${parts[0]}`).emit('receive_message', newMessage);
                 if (normReceiver) io.to(normReceiver).emit('receive_message', newMessage);
                 io.to(clean(sender)).emit('receive_message', newMessage); // Sync sender
@@ -301,6 +301,7 @@ io.on('connection', (socket) => {
 
     socket.on('disconnect', () => { });
 });
+
 
 
 
