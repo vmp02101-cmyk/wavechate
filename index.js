@@ -234,7 +234,7 @@ io.on('connection', (socket) => {
         try {
             const result = await db.run(
                 "INSERT INTO messages (chatId, sender, text, type, mediaUrl) VALUES (?, ?, ?, ?, ?)",
-                [normChatId, sender, text, type, mediaUrl]
+                [normChatId, sender, text || null, type || 'text', mediaUrl || null]
             );
 
             const newMessage = {
