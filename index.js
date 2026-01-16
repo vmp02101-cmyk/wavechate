@@ -212,15 +212,21 @@ io.on('connection', (socket) => {
 
     socket.on('register', (userId) => {
         if (!userId) return;
+        console.log(`📡 [DEBUG] Register Request: ${userId}`);
         const normalized = userId.toString().replace(/\D/g, '').slice(-10);
         socket.join(userId);
         if (normalized.length === 10 && normalized !== userId) {
             socket.join(normalized);
+            console.log(`✅ [DEBUG] Joined Normalized Room: ${normalized}`);
         }
+        console.log(`👤 User Registered: ${userId}`);
     });
 
     socket.on('send_message', async (data) => {
         const { chatId, sender, text, type, mediaUrl } = data;
+
+        console.log(`📨 [DEBUG] New Message from ${sender} in ${chatId}`);
+
         if (!chatId || !sender) {
             console.error('❌ [DEBUG] Message rejected: Missing chatId or sender');
             return;
@@ -248,6 +254,8 @@ io.on('connection', (socket) => {
             if (parts.length === 2) {
                 const normParts = parts.map(clean);
                 const normReceiver = normParts.find(p => p !== clean(sender));
+
+                console.log(`🚀 Dispatching Msg to: ${normChatId} AND Receiver: ${normReceiver}`);
 
                 // Emit to rooms
                 io.to(chatId).emit('receive_message', newMessage);
@@ -293,6 +301,7 @@ io.on('connection', (socket) => {
 
     socket.on('disconnect', () => { });
 });
+
 
 
 
