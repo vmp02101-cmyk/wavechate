@@ -1,92 +1,145 @@
-const sqlite3 = require('sqlite3');
-const { open } = require('sqlite');
-const path = require('path');
+const mysql = require('mysql2/promise');
+require('dotenv').config();
 
-let db;
+let pool;
+
+// Wrapper class to mimic SQLite API for MySQL
+class MySQLWrapper {
+    constructor(pool) {
+        this.pool = pool;
+    }
+
+    async exec(sql) {
+        // Handle multiple statements if needed, or just execute
+        return await this.pool.query(sql);
+    }
+
+    async run(sql, params = []) {
+        const [result] = await this.pool.execute(sql, params);
+        return {
+            lastID: result.insertId,
+            changes: result.affectedRows
+        };
+    }
+
+    async get(sql, params = []) {
+        const [rows] = await this.pool.execute(sql, params);
+        return rows[0];
+    }
+
+    async all(sql, params = []) {
+        const [rows] = await this.pool.execute(sql, params);
+        return rows;
+    }
+}
 
 async function initDB() {
-    db = await open({
+    // Check if MySQL credentials are provided
+    if (process.env.DB_HOST && process.env.DB_USER && process.env.DB_PASSWORD && process.env.DB_NAME) {
+        console.log('🔌 Connecting to Hostinger MySQL Database...');
+        try {
+            pool = mysql.createPool({
+                host: process.env.DB_HOST,
+                user: process.env.DB_USER,
+                password: process.env.DB_PASSWORD,
+                database: process.env.DB_NAME,
+                waitForConnections: true,
+                connectionLimit: 10,
+                queueLimit: 0,
+                multipleStatements: true // Allow multiple queries in exec
+            });
+
+            const db = new MySQLWrapper(pool);
+            console.log('✅ Connected to MySQL Database!');
+
+            // Create Tables (MySQL syntax compatible)
+            // Note: INT PRIMARY KEY AUTO_INCREMENT is slightly different from SQLite INTEGER PRIMARY KEY AUTOINCREMENT
+            // But we will use IF NOT EXISTS
+            await createTables(db);
+
+            return db;
+        } catch (err) {
+            console.error('❌ MySQL Connection Failed:', err.message);
+            console.log('⚠️ Falling back to SQLite...');
+        }
+    }
+
+    // Fallback to SQLite if MySQL fails or variables missing
+    const sqlite3 = require('sqlite3');
+    const { open } = require('sqlite');
+    const path = require('path');
+
+    console.log('📂 Using Local SQLite Database...');
+    const db = await open({
         filename: path.join(__dirname, 'wavechat.db'),
         driver: sqlite3.Database
     });
 
-    console.log('✅ Connected to SQLite Database (wavechat.db)');
-
-    // Create Tables
-    await db.exec(`
-        CREATE TABLE IF NOT EXISTS users (
-            id TEXT PRIMARY KEY,
-            name TEXT,
-            phone TEXT UNIQUE,
-            image TEXT,
-            lastSeen DATETIME DEFAULT CURRENT_TIMESTAMP
-        );
-
-        CREATE TABLE IF NOT EXISTS messages (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            chatId TEXT,
-            sender TEXT,
-            text TEXT,
-            type TEXT,
-            mediaUrl TEXT,
-            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-        );
-
-        CREATE TABLE IF NOT EXISTS status (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            userId TEXT,
-            userName TEXT,
-            type TEXT,
-            content TEXT,
-            bgColor TEXT,
-            mediaUrl TEXT,
-            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-            expiresAt DATETIME
-        );
-
-        CREATE TABLE IF NOT EXISTS call_recordings (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            callId TEXT,
-            callerId TEXT,
-            receiverId TEXT,
-            startTime DATETIME DEFAULT CURRENT_TIMESTAMP,
-            endTime DATETIME,
-            duration INTEGER,
-            recordingUrl TEXT
-        );
-
-        CREATE TABLE IF NOT EXISTS groups (
-            id TEXT PRIMARY KEY,
-            name TEXT NOT NULL,
-            icon TEXT,
-            description TEXT,
-            createdBy TEXT NOT NULL,
-            createdAt DATETIME DEFAULT CURRENT_TIMESTAMP
-        );
-
-        CREATE TABLE IF NOT EXISTS group_members (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            groupId TEXT NOT NULL,
-            userId TEXT NOT NULL,
-            isAdmin INTEGER DEFAULT 0,
-            joinedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (groupId) REFERENCES groups(id)
-        );
-
-        CREATE TABLE IF NOT EXISTS group_messages (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            groupId TEXT NOT NULL,
-            sender TEXT NOT NULL,
-            senderName TEXT NOT NULL,
-            text TEXT,
-            type TEXT DEFAULT 'text',
-            mediaUrl TEXT,
-            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (groupId) REFERENCES groups(id)
-        );
-    `);
-
+    await createTables(db);
     return db;
 }
 
-module.exports = { initDB, getDB: () => db };
+// Helper to create tables (Works for both mostly, but adjustments might be needed for AUTO_INCREMENT)
+async function createTables(db) {
+    // MySQL uses AUTO_INCREMENT, SQLite uses AUTOINCREMENT
+    // We try to catch errors or assume setup is done via phpMyAdmin mainly
+    // But let's try a compatible schema
+
+    const isMySQL = db instanceof MySQLWrapper;
+    const autoInc = isMySQL ? 'AUTO_INCREMENT' : 'AUTOINCREMENT';
+    const primaryKey = isMySQL ? `INT PRIMARY KEY ${autoInc}` : 'INTEGER PRIMARY KEY AUTOINCREMENT';
+    const textType = isMySQL ? 'TEXT' : 'TEXT';
+
+    // Users
+    await db.exec(`
+        CREATE TABLE IF NOT EXISTS users (
+            id VARCHAR(255) PRIMARY KEY,
+            name TEXT,
+            phone VARCHAR(255) UNIQUE,
+            image TEXT,
+            lastSeen TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+    `);
+
+    // Messages
+    await db.exec(`
+        CREATE TABLE IF NOT EXISTS messages (
+            id ${primaryKey},
+            chatId VARCHAR(255),
+            sender VARCHAR(255),
+            text TEXT,
+            type VARCHAR(50),
+            mediaUrl TEXT,
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+    `);
+
+    // Status
+    await db.exec(`
+         CREATE TABLE IF NOT EXISTS status (
+            id ${primaryKey},
+            userId VARCHAR(255),
+            userName TEXT,
+            type VARCHAR(50),
+            content TEXT,
+            bgColor VARCHAR(50),
+            mediaUrl TEXT,
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            expiresAt DATETIME
+        );
+    `);
+
+    // Groups
+    await db.exec(`
+        CREATE TABLE IF NOT EXISTS groups_table (
+            id VARCHAR(255) PRIMARY KEY,
+            name TEXT,
+            icon TEXT,
+            description TEXT,
+            createdBy VARCHAR(255) /*,
+            createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP */
+        );
+    `);
+}
+
+module.exports = { initDB, getDB: () => pool ? new MySQLWrapper(pool) : require('sqlite').open() };
