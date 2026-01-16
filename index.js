@@ -42,6 +42,27 @@ app.get('/', (req, res) => {
     });
 });
 
+// DEBUG ROUTE (Temporary)
+app.get('/api/debug-db', async (req, res) => {
+    try {
+        if (!db) return res.status(500).json({ error: 'Database instance is null' });
+
+        // 1. Check Tables
+        const tables = await db.all("SELECT name FROM sqlite_master WHERE type='table'");
+
+        // 2. Check Last 5 Messages
+        const messages = await db.all("SELECT * FROM messages ORDER BY id DESC LIMIT 5");
+
+        res.json({
+            status: 'Database Connected',
+            tables: tables,
+            recent_messages: messages
+        });
+    } catch (e) {
+        res.status(500).json({ error: e.message, stack: e.stack });
+    }
+});
+
 // Initialize Database
 initDB().then(database => {
     db = database;
@@ -133,18 +154,29 @@ app.get('/api/chats/:userId', async (req, res) => {
         // Sort by time desc
         rawMessages.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
 
-        const clean = (id) => id.toString().replace(/\D/g, '').slice(-10);
+        const clean = (id) => {
+            if (!id) return '';
+            return String(id).replace(/\D/g, '').slice(-10);
+        };
 
         for (const msg of rawMessages) {
+            if (!msg.chatId) continue;
+
             // Normalize ID
-            const cleanParts = msg.chatId.split('_').map(clean).sort();
+            const cleanParts = String(msg.chatId).split('_').map(clean).sort();
             const normCid = cleanParts.join('_');
 
             if (seenChats.has(normCid)) continue;
             seenChats.add(normCid);
 
-            const otherId = cleanParts.find(id => id !== clean(userId));
-            if (!otherId) continue;
+            const myCleanId = clean(userId);
+            const otherId = cleanParts.find(id => id !== myCleanId);
+
+            // If self-chat or single ID, try to interpret
+            if (!otherId) {
+                // If it's a 1-to-1 chat where both IDs are same (self) or temp ID, skip or handle
+                continue;
+            }
 
             // Fetch user details
             const user = await db.get("SELECT name, image, id FROM users WHERE phone LIKE ?", [`%${otherId}`]);
@@ -181,7 +213,7 @@ const storage = new CloudinaryStorage({
     cloudinary: cloudinary,
     params: {
         folder: 'wavechat_media',
-        allowed_formats: ['jpg', 'png', 'jpeg', 'mp4', 'webm', 'wav', 'mp3'],
+        allowed_formats: ['jpg', 'png', 'jpeg', 'mp4', 'webm', 'wav', 'mp3', 'mov', 'avi', 'mkv', 'pdf', 'doc', 'docx'],
         resource_type: 'auto' // Important for video/audio
     }
 });
@@ -200,7 +232,9 @@ app.post('/api/upload', (req, res) => {
         }
 
         console.log('✅ File Uploaded to Cloudinary:', req.file.path);
-        res.json({ url: req.file.path });
+        // Force HTTPS to prevent Mixed Content errors
+        const secureUrl = req.file.path.replace(/^http:/, 'https:');
+        res.json({ url: secureUrl });
     });
 });
 
@@ -301,8 +335,5 @@ io.on('connection', (socket) => {
 
     socket.on('disconnect', () => { });
 });
-
-
-
 
 
