@@ -221,10 +221,15 @@ io.on('connection', (socket) => {
 
     socket.on('send_message', async (data) => {
         const { chatId, sender, text, type, mediaUrl } = data;
-        if (!chatId || !sender) return;
+        if (!chatId || !sender) {
+            console.error('❌ [DEBUG] Message rejected: Missing chatId or sender');
+            return;
+        }
 
         const clean = (id) => id.toString().replace(/\D/g, '').slice(-10);
-        const normChatId = chatId.split('_').map(clean).sort().join('_');
+        // Ensure chatId is a string to prevent crashes
+        const safeChatId = String(chatId);
+        const normChatId = safeChatId.split('_').map(clean).sort().join('_');
 
         try {
             const result = await db.run(
@@ -288,5 +293,6 @@ io.on('connection', (socket) => {
 
     socket.on('disconnect', () => { });
 });
+
 
 
