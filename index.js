@@ -167,27 +167,32 @@ app.get('/api/chats/:userId', async (req, res) => {
     }
 });
 
-// File Upload
-const storage = multer.diskStorage({
-    destination: (req, file, cb) => {
-        const dest = path.join(__dirname, 'public/uploads');
-        // Ensure dir exists
-        if (!fs.existsSync(dest)) {
-            fs.mkdirSync(dest, { recursive: true });
-        }
-        cb(null, dest);
-    },
-    filename: (req, file, cb) => {
-        const ext = path.extname(file.originalname);
-        cb(null, `media_${Date.now()}${ext}`);
+// --- CLOUDINARY CONFIG ---
+const cloudinary = require('cloudinary').v2;
+const { CloudinaryStorage } = require('multer-storage-cloudinary');
+
+cloudinary.config({
+    cloud_name: 'djrsvab8b',
+    api_key: '927344822344179',
+    api_secret: 'Q73j2dAbfXyGZlO6Ds5Q7ArWv2c'
+});
+
+const storage = new CloudinaryStorage({
+    cloudinary: cloudinary,
+    params: {
+        folder: 'wavechat_media',
+        allowed_formats: ['jpg', 'png', 'jpeg', 'mp4', 'webm', 'wav', 'mp3'],
+        resource_type: 'auto' // Important for video/audio
     }
 });
-const upload = multer({ storage });
+
+const upload = multer({ storage: storage });
 
 app.post('/api/upload', upload.single('file'), (req, res) => {
     if (!req.file) return res.status(400).json({ error: "No file uploaded" });
-    const fileUrl = `/uploads/${req.file.filename}`;
-    res.json({ url: fileUrl });
+    // Cloudinary returns the URL in req.file.path
+    console.log('✅ File Uploaded to Cloudinary:', req.file.path);
+    res.json({ url: req.file.path });
 });
 
 // --- SOCKET.IO ---
@@ -274,6 +279,7 @@ io.on('connection', (socket) => {
 
     socket.on('disconnect', () => { });
 });
+
 
 
 
