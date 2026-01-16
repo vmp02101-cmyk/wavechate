@@ -188,11 +188,20 @@ const storage = new CloudinaryStorage({
 
 const upload = multer({ storage: storage });
 
-app.post('/api/upload', upload.single('file'), (req, res) => {
-    if (!req.file) return res.status(400).json({ error: "No file uploaded" });
-    // Cloudinary returns the URL in req.file.path
-    console.log('✅ File Uploaded to Cloudinary:', req.file.path);
-    res.json({ url: req.file.path });
+app.post('/api/upload', (req, res) => {
+    upload.single('file')(req, res, (err) => {
+        if (err) {
+            console.error('❌ Upload Error Details:', err);
+            return res.status(500).json({ error: err.message || "Upload Failed" });
+        }
+        if (!req.file) {
+            console.error('❌ No file received in request');
+            return res.status(400).json({ error: "No file uploaded" });
+        }
+
+        console.log('✅ File Uploaded to Cloudinary:', req.file.path);
+        res.json({ url: req.file.path });
+    });
 });
 
 // --- SOCKET.IO ---
@@ -279,4 +288,5 @@ io.on('connection', (socket) => {
 
     socket.on('disconnect', () => { });
 });
+
 
