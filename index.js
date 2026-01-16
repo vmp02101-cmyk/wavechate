@@ -88,7 +88,7 @@ app.post('/api/users/register', async (req, res) => {
     const cleanPhone = phone.replace(/[^0-9]/g, '');
     try {
         await db.run(
-            "INSERT INTO users (id, name, phone, image) VALUES (?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name=excluded.name, phone=excluded.phone, image=excluded.image, lastSeen=CURRENT_TIMESTAMP",
+            "INSERT INTO users (id, name, phone, image) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE name=VALUES(name), phone=VALUES(phone), image=VALUES(image), lastSeen=CURRENT_TIMESTAMP",
             [id, name, cleanPhone, image]
         );
         res.status(200).json({ success: true });
@@ -630,3 +630,4 @@ io.on('connection', (socket) => {
         console.log('User disconnected:', socket.id);
     });
 });
+
