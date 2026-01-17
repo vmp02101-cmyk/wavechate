@@ -144,9 +144,15 @@ async function createTables(db) {
             description TEXT,
             createdBy VARCHAR(255),
             admins TEXT, -- JSON array of admin IDs
+            type VARCHAR(50) DEFAULT 'public',
             createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
     `);
+
+    // Migration for existing table (Safe to run)
+    try {
+        await db.exec("ALTER TABLE groups_table ADD COLUMN type VARCHAR(50) DEFAULT 'public'");
+    } catch (e) { /* Ignore if exists */ }
 
     // Group Members
     await db.exec(`
