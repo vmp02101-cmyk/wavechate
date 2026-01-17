@@ -384,7 +384,7 @@ io.on('connection', (socket) => {
 
         // Auto-join Group Rooms
         try {
-            db.all("SELECT groupId FROM group_members WHERE userId = ?", [String(userId)])
+            db.all("SELECT groupId FROM group_members WHERE userId = ?", [normalized])
                 .then(groups => {
                     groups.forEach(g => {
                         socket.join(g.groupId);
@@ -507,13 +507,15 @@ io.on('connection', (socket) => {
             );
 
             // Members: Ensure we handle array of objects {id, isAdmin}
-            // groupData.members usually matches structure from frontend
-            for (const m of groupData.members) {
-                await db.run("INSERT INTO group_members (groupId, userId, role) VALUES (?, ?, ?)",
-                    [safeId, m.id, m.isAdmin ? 'admin' : 'member']);
+            const clean = (id) => String(id).replace(/\D/g, '').slice(-10);
 
-                // Notify Member
-                io.to(m.id).emit('new_group_created', groupData);
+            for (const m of groupData.members) {
+                const cleanMemberId = clean(m.id);
+                await db.run("INSERT INTO group_members (groupId, userId, role) VALUES (?, ?, ?)",
+                    [safeId, cleanMemberId, m.isAdmin ? 'admin' : 'member']);
+
+                // Notify Member (Emit to both Clean and Raw if possible, Clean is safest)
+                io.to(cleanMemberId).emit('new_group_created', groupData);
             }
         } catch (e) {
             console.error('Group Create Error:', e);
@@ -522,7 +524,6 @@ io.on('connection', (socket) => {
 
     socket.on('disconnect', () => { });
 });
-
 
 
 
