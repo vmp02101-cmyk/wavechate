@@ -433,6 +433,19 @@ io.on('connection', (socket) => {
                 io.to(clean(sender)).emit('receive_message', newMessage); // Sync sender
             } else {
                 // GROUP CHAT BROADCAST
+
+                // Permission Check for Private Groups
+                try {
+                    const groupInfo = await db.get("SELECT type FROM groups_table WHERE id = ?", [safeChatId]);
+                    if (groupInfo && groupInfo.type === 'private') {
+                        const member = await db.get("SELECT role FROM group_members WHERE groupId = ? AND userId = ?", [safeChatId, clean(sender)]);
+                        if (!member || member.role !== 'admin') {
+                            console.log(`⛔ Blocked message from non-admin ${sender} in Private Group ${safeChatId}`);
+                            return;
+                        }
+                    }
+                } catch (e) { console.error("Permission check failed", e); }
+
                 console.log(`🚀 Dispatching Group Msg to: ${safeChatId}`);
                 io.to(safeChatId).emit('receive_message', newMessage);
 
@@ -485,8 +498,8 @@ io.on('connection', (socket) => {
         try {
             const safeId = String(groupData.id);
             await db.run(
-                "INSERT INTO groups_table (id, name, icon, createdBy, admins) VALUES (?, ?, ?, ?, ?)",
-                [safeId, groupData.name, groupData.avatar, groupData.createdBy, JSON.stringify(groupData.admins || [])]
+                "INSERT INTO groups_table (id, name, icon, createdBy, admins, type) VALUES (?, ?, ?, ?, ?, ?)",
+                [safeId, groupData.name, groupData.avatar, groupData.createdBy, JSON.stringify(groupData.admins || []), groupData.type || 'public']
             );
 
             // Members: Ensure we handle array of objects {id, isAdmin}
@@ -505,7 +518,6 @@ io.on('connection', (socket) => {
 
     socket.on('disconnect', () => { });
 });
-
 
 
 
