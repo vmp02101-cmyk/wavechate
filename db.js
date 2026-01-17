@@ -46,11 +46,17 @@ async function initDB() {
                 waitForConnections: true,
                 connectionLimit: 10,
                 queueLimit: 0,
-                multipleStatements: true // Allow multiple queries in exec
+                multipleStatements: true, // Allow multiple queries in exec
+                connectTimeout: 10000 // 10s timeout
             });
 
+            // Verify connection strictly before proceeding
+            const connection = await pool.getConnection(); // Try to get a connection
+            await connection.ping(); // Ping to ensure it's alive
+            connection.release(); // Release it back
+
             const db = new MySQLWrapper(pool);
-            console.log('✅ Connected to MySQL Database!');
+            console.log('✅ Connected to Hostinger MySQL Database (Verified)!');
 
             // Create Tables (MySQL syntax compatible)
             // Note: INT PRIMARY KEY AUTO_INCREMENT is slightly different from SQLite INTEGER PRIMARY KEY AUTOINCREMENT
@@ -60,7 +66,7 @@ async function initDB() {
             return db;
         } catch (err) {
             console.error('❌ MySQL Connection Failed:', err.message);
-            console.log('⚠️ Falling back to SQLite...');
+            console.log('⚠️ Falling back to Local SQLite...'); // Explicit fallback log
         }
     }
 
@@ -136,10 +142,23 @@ async function createTables(db) {
             name TEXT,
             icon TEXT,
             description TEXT,
-            createdBy VARCHAR(255) /*,
-            createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP */
+            createdBy VARCHAR(255),
+            admins TEXT, -- JSON array of admin IDs
+            createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+    `);
+
+    // Group Members
+    await db.exec(`
+        CREATE TABLE IF NOT EXISTS group_members (
+            id ${primaryKey},
+            groupId VARCHAR(255),
+            userId VARCHAR(255),
+            role VARCHAR(50) DEFAULT 'member',
+            joinedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
     `);
 }
 
 module.exports = { initDB, getDB: () => pool ? new MySQLWrapper(pool) : require('sqlite').open() };
+
