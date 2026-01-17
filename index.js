@@ -1,3 +1,4 @@
+
 const express = require('express');
 const http = require('http');
 const path = require('path');
@@ -277,7 +278,7 @@ app.get('/api/chats/:userId', async (req, res) => {
         }
 
         // 2. FETCH PRIVATE CHATS
-        const rawMessages = await db.all("SELECT * FROM messages WHERE chatId LIKE ?", [`%${userId}%`]);
+        const rawMessages = await db.all("SELECT * FROM messages WHERE chatId LIKE ?", [`%${cleanId}%`]);
         const seenChats = new Set();
 
         // Add existing groups to seen to avoid duplication if msg logic overlaps (unlikely)
@@ -562,3 +563,4 @@ io.on('connection', (socket) => {
 
     socket.on('disconnect', () => { });
 });
+
