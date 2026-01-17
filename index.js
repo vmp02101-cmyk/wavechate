@@ -213,6 +213,17 @@ app.get('/api/messages/:chatId', async (req, res) => {
     }
 });
 
+// Get Group Messages
+app.get('/api/groups/:groupId/messages', async (req, res) => {
+    try {
+        const { groupId } = req.params;
+        const rows = await db.all("SELECT * FROM messages WHERE chatId = ? ORDER BY timestamp ASC", [String(groupId)]);
+        res.status(200).json(rows);
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
 // Get Chats List for a User (Groups + Private)
 app.get('/api/chats/:userId', async (req, res) => {
     const userId = req.params.userId;
@@ -494,4 +505,3 @@ io.on('connection', (socket) => {
 
     socket.on('disconnect', () => { });
 });
-
