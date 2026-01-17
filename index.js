@@ -366,6 +366,18 @@ io.on('connection', (socket) => {
             console.log(`✅ [DEBUG] Joined Normalized Room: ${normalized}`);
         }
         console.log(`👤 User Registered: ${userId}`);
+
+        // Auto-join Group Rooms
+        try {
+            db.all("SELECT groupId FROM group_members WHERE userId = ?", [String(userId)])
+                .then(groups => {
+                    groups.forEach(g => {
+                        socket.join(g.groupId);
+                        console.log(`✅ [DEBUG] Auto-Joined Group: ${g.groupId}`);
+                    });
+                })
+                .catch(e => console.error("Auto-join error", e));
+        } catch (e) { }
     });
 
     socket.on('send_message', async (data) => {
@@ -408,6 +420,18 @@ io.on('connection', (socket) => {
                 io.to(`${parts[1]}_${parts[0]}`).emit('receive_message', newMessage);
                 if (normReceiver) io.to(normReceiver).emit('receive_message', newMessage);
                 io.to(clean(sender)).emit('receive_message', newMessage); // Sync sender
+            } else {
+                // GROUP CHAT BROADCAST
+                console.log(`🚀 Dispatching Group Msg to: ${safeChatId}`);
+                io.to(safeChatId).emit('receive_message', newMessage);
+
+                // Redundant Direct Emit to members (Reliability)
+                try {
+                    const members = await db.all("SELECT userId FROM group_members WHERE groupId = ?", [safeChatId]);
+                    members.forEach(m => {
+                        io.to(m.userId).emit('receive_message', newMessage);
+                    });
+                } catch (e) { console.error("Group dispatch error", e); }
             }
         } catch (err) {
             console.error('❌ Insert Error:', err);
@@ -470,5 +494,3 @@ io.on('connection', (socket) => {
 
     socket.on('disconnect', () => { });
 });
-
-
