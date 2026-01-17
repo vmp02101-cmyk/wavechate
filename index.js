@@ -523,9 +523,41 @@ io.on('connection', (socket) => {
                 // Notify Member (Emit to both Clean and Raw if possible, Clean is safest)
                 io.to(cleanMemberId).emit('new_group_created', groupData);
             }
+
+            // Explicitly Add Creator as Admin Member
+            if (groupData.createdBy) {
+                const creatorId = clean(groupData.createdBy);
+                // Check if already processed
+                const alreadyAdded = groupData.members.find(m => clean(m.id) === creatorId);
+                if (!alreadyAdded) {
+                    await db.run("INSERT INTO group_members (groupId, userId, role) VALUES (?, ?, ?)",
+                        [safeId, creatorId, 'admin']);
+                }
+            }
         } catch (e) {
             console.error('Group Create Error:', e);
         }
+    });
+
+    // --- CALL SIGNALING ---
+    socket.on('call_user', (data) => {
+        const { userToCall, signalData, from, name } = data;
+        const cleanTo = userToCall.toString().replace(/\D/g, '').slice(-10);
+        console.log(`📞 Call Request from ${from} to ${cleanTo}`);
+        io.to(cleanTo).emit('incoming_call', { signal: signalData, from, name });
+    });
+
+    socket.on('answer_call', (data) => {
+        const { to, signal } = data;
+        const cleanTo = to.toString().replace(/\D/g, '').slice(-10);
+        console.log(`📞 Call Answered by ${cleanTo}`);
+        io.to(cleanTo).emit('call_accepted', signal);
+    });
+
+    socket.on('reject_call', (data) => {
+        const { to } = data;
+        const cleanTo = to.toString().replace(/\D/g, '').slice(-10);
+        io.to(cleanTo).emit('call_rejected');
     });
 
     socket.on('disconnect', () => { });
