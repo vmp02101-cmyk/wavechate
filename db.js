@@ -161,4 +161,3 @@ async function createTables(db) {
 }
 
 module.exports = { initDB, getDB: () => pool ? new MySQLWrapper(pool) : require('sqlite').open() };
-
