@@ -1,4 +1,3 @@
-
 const express = require('express');
 const http = require('http');
 const path = require('path');
@@ -235,6 +234,10 @@ app.get('/api/chats/:userId', async (req, res) => {
         return String(id).replace(/\D/g, '').slice(-10);
     };
     const cleanId = clean(rawUserId);
+
+    if (!cleanId || cleanId.length < 5) {
+        return res.status(400).json({ error: "Invalid User ID" });
+    }
 
     // Support both Raw (+91..) and Clean (91..) IDs to handle legacy data
     const possibleIds = [rawUserId, cleanId, `+${cleanId}`].filter(Boolean);
