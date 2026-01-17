@@ -226,7 +226,15 @@ app.get('/api/groups/:groupId/messages', async (req, res) => {
 
 // Get Chats List for a User (Groups + Private)
 app.get('/api/chats/:userId', async (req, res) => {
-    const userId = req.params.userId;
+    const rawUserId = req.params.userId;
+
+    // Normalize ID for consistent DB querying
+    const clean = (id) => {
+        if (!id) return '';
+        return String(id).replace(/\D/g, '').slice(-10);
+    };
+    const userId = clean(rawUserId);
+
     try {
         const uniqueChats = [];
 
@@ -270,11 +278,7 @@ app.get('/api/chats/:userId', async (req, res) => {
         uniqueChats.forEach(c => seenChats.add(c.id));
 
         rawMessages.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-
-        const clean = (id) => {
-            if (!id) return '';
-            return String(id).replace(/\D/g, '').slice(-10);
-        };
+        // clean function hoisted to top
 
         for (const msg of rawMessages) {
             if (!msg.chatId) continue;
@@ -518,6 +522,7 @@ io.on('connection', (socket) => {
 
     socket.on('disconnect', () => { });
 });
+
 
 
 
