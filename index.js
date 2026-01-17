@@ -464,10 +464,15 @@ io.on('connection', (socket) => {
                 io.to(safeChatId).emit('receive_message', newMessage);
 
                 // Redundant Direct Emit to members (Reliability)
+                // Redundant Direct Emit to members (Reliability)
                 try {
                     const members = await db.all("SELECT userId FROM group_members WHERE groupId = ?", [safeChatId]);
+                    const clean = (id) => String(id).replace(/\D/g, '').slice(-10);
+
                     members.forEach(m => {
+                        // Emit to both Raw and Clean ID to ensure delivery
                         io.to(m.userId).emit('receive_message', newMessage);
+                        io.to(clean(m.userId)).emit('receive_message', newMessage);
                     });
                 } catch (e) { console.error("Group dispatch error", e); }
             }
@@ -564,6 +569,32 @@ io.on('connection', (socket) => {
         io.to(cleanTo).emit('call_rejected');
     });
 
+    // --- GROUP CALL SIGNALING ---
+    socket.on('group_call', async (data) => {
+        const { groupId, signalData, from, name } = data;
+        const cleanFrom = String(from).replace(/\D/g, '').slice(-10);
+        console.log(`📞 Group Call Started in ${groupId} by ${from}`);
+
+        try {
+            const members = await db.all("SELECT userId FROM group_members WHERE groupId = ?", [String(groupId)]);
+            const clean = (id) => String(id).replace(/\D/g, '').slice(-10);
+
+            members.forEach(m => {
+                const mClean = clean(m.userId);
+                if (mClean !== cleanFrom) {
+                    io.to(mClean).emit('incoming_call', {
+                        signal: signalData,
+                        from,
+                        name,
+                        isGroupCall: true,
+                        groupId
+                    });
+                }
+            });
+        } catch (e) { console.error("Group call error", e); }
+    });
+
     socket.on('disconnect', () => { });
 });
+
 
