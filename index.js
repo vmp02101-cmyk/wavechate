@@ -34,7 +34,7 @@ const io = new Server(server, {
 let db;
 
 // Root route
-app.get('/', (req, res) => {
+app.get('/api', (req, res) => {
     res.json({
         status: 'ok',
         message: 'WaveChat Backend API',
@@ -77,6 +77,86 @@ initDB().then(database => {
 });
 
 const fs = require('fs');
+
+// --- OTP STORE (Simple In-Memory) ---
+const otpStore = new Map(); // Stores phone -> { code, expires }
+
+// --- FAST2SMS CONFIG ---
+const FAST2SMS_API_KEY = "JIxboAdQND7ME8K6S30qOYvh5VnULymWP1gBptcR9ZlsiXzFrjtrZzya83oELYxA4e6qIRFSvPUJBNbk"; // Replace with your key
+
+// Send OTP
+app.post('/api/otp/send', async (req, res) => {
+    let { phone } = req.body;
+
+    // Ensure 10 digit number
+    const cleanPhone = phone.replace(/[^0-9]/g, '');
+    const number = cleanPhone.slice(-10);
+
+    if (cleanPhone.length < 10) {
+        return res.status(400).json({ error: "Invalid phone number" });
+    }
+
+    // Generate 6 digit OTP
+    const otp = Math.floor(100000 + Math.random() * 900000);
+
+    // Store OTP (Expires in 5 mins)
+    otpStore.set(number, {
+        code: otp,
+        expires: Date.now() + 5 * 60 * 1000
+    });
+
+    console.log(`🔒 Generated OTP for ${number}: ${otp}`);
+
+    // Call Fast2SMS API
+    try {
+        const response = await axios.post('https://www.fast2sms.com/dev/bulkV2', {
+            "route": "v3",
+            "sender_id": "TXTIND",
+            "message": `Your WaveChat Verification Code is: ${otp}`,
+            "language": "english",
+            "flash": 0,
+            "numbers": number,
+        }, {
+            headers: { "authorization": FAST2SMS_API_KEY }
+        });
+
+        if (response.data.return) {
+            console.log("✅ SMS Sent Successfully");
+            res.json({ success: true, message: "OTP Sent" });
+        } else {
+            console.error("❌ Fast2SMS Error:", response.data);
+            // Fallback for testing if SMS fails (Remove in production)
+            res.json({ success: true, message: "Use Test OTP: " + otp, isTest: true });
+        }
+    } catch (error) {
+        console.error("❌ SMS Network Error:", error.message);
+        res.status(500).json({ error: "Failed to send SMS" });
+    }
+});
+
+// Verify OTP
+app.post('/api/otp/verify', (req, res) => {
+    let { phone, code } = req.body;
+    const number = phone.replace(/[^0-9]/g, '').slice(-10);
+
+    const record = otpStore.get(number);
+
+    if (!record) {
+        return res.status(400).json({ error: "No OTP found/Expired" });
+    }
+
+    if (Date.now() > record.expires) {
+        otpStore.delete(number);
+        return res.status(400).json({ error: "OTP Expired" });
+    }
+
+    if (parseInt(record.code) === parseInt(code)) {
+        otpStore.delete(number); // Clear used OTP
+        return res.json({ success: true });
+    } else {
+        return res.status(400).json({ error: "Invalid Code" });
+    }
+});
 
 // Register/Update User
 app.post('/api/users/register', async (req, res) => {
@@ -133,25 +213,51 @@ app.get('/api/messages/:chatId', async (req, res) => {
     }
 });
 
-// Get Chats List for a User
+// Get Chats List for a User (Groups + Private)
 app.get('/api/chats/:userId', async (req, res) => {
     const userId = req.params.userId;
     try {
-        // Note: '||' is standard SQL concatenation, works in SQLite. 
-        // MySQL uses CONCAT() strictly unless pipes_as_concat is enabled, but usually pipes fail in default MySQL.
-        // Let's use a cleaner approach compatible with both using ? params or simple LIKE
-
-        // This query is complex enough that we should check DB type if we face issues.
-        // For now, let's assume the wrapper handles simple queries.
-
-        // Getting recent chats via simple logic might be safer
-        const rawMessages = await db.all("SELECT * FROM messages WHERE chatId LIKE ?", [`%${userId}%`]);
-
-        // Grouping in JS to avoid complex incompatible SQL GROUP BY
         const uniqueChats = [];
+
+        // 1. FETCH GROUPS
+        try {
+            const groups = await db.all(
+                "SELECT g.* FROM groups_table g JOIN group_members gm ON g.id = gm.groupId WHERE gm.userId = ?",
+                [userId]
+            );
+
+            for (const g of groups) {
+                // Get Last Message for Group
+                const lastMsg = await db.get("SELECT * FROM messages WHERE chatId = ? ORDER BY timestamp DESC LIMIT 1", [g.id]);
+
+                // Get Members (Optional for list, but useful)
+                const members = await db.all("SELECT userId as id, role FROM group_members WHERE groupId = ?", [g.id]);
+
+                uniqueChats.push({
+                    id: g.id,
+                    name: g.name,
+                    isGroup: true,
+                    members: members.map(m => ({ id: m.id, isAdmin: m.role === 'admin' })),
+                    lastMessage: lastMsg ? (lastMsg.text || 'Media') : 'Tap to chat',
+                    time: lastMsg ? lastMsg.timestamp : (g.createdAt || new Date().toISOString()),
+                    unread: 0,
+                    avatar: g.icon,
+                    createdBy: g.createdBy,
+                    admins: JSON.parse(g.admins || '[]')
+                });
+            }
+        } catch (e) {
+            console.error("Error fetching groups:", e);
+            // Continue to private chats even if groups fail
+        }
+
+        // 2. FETCH PRIVATE CHATS
+        const rawMessages = await db.all("SELECT * FROM messages WHERE chatId LIKE ?", [`%${userId}%`]);
         const seenChats = new Set();
 
-        // Sort by time desc
+        // Add existing groups to seen to avoid duplication if msg logic overlaps (unlikely)
+        uniqueChats.forEach(c => seenChats.add(c.id));
+
         rawMessages.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
 
         const clean = (id) => {
@@ -162,37 +268,43 @@ app.get('/api/chats/:userId', async (req, res) => {
         for (const msg of rawMessages) {
             if (!msg.chatId) continue;
 
-            // Normalize ID
+            // If it's a group ID (no _ separator usually, or different format), stick to private logic
+            // Private chats strictly defined as containing userId
+            // Filter out group messages here if mixed?
+            // Assuming private chat is A_B format.
+            if (!String(msg.chatId).includes('_')) continue; // Skip groups
+
             const cleanParts = String(msg.chatId).split('_').map(clean).sort();
             const normCid = cleanParts.join('_');
 
             if (seenChats.has(normCid)) continue;
-            seenChats.add(normCid);
 
             const myCleanId = clean(userId);
             const otherId = cleanParts.find(id => id !== myCleanId);
 
-            // If self-chat or single ID, try to interpret
-            if (!otherId) {
-                // If it's a 1-to-1 chat where both IDs are same (self) or temp ID, skip or handle
-                continue;
-            }
+            if (!otherId) continue;
 
-            // Fetch user details
-            const user = await db.get("SELECT name, image, id FROM users WHERE phone LIKE ?", [`%${otherId}`]);
+            seenChats.add(normCid);
+
+            // Fetch user
+            const user = await db.get("SELECT name, image FROM users WHERE phone LIKE ?", [`%${otherId}`]);
 
             uniqueChats.push({
-                chatId: normCid,
-                text: msg.text,
-                timestamp: msg.timestamp,
-                otherUserName: user ? user.name : otherId,
-                otherUserImage: user ? user.image : `https://ui-avatars.com/api/?name=${encodeURIComponent(otherId)}&background=00a884&color=fff`,
-                otherUserId: otherId,
+                id: normCid, // Map chatId to id
+                name: user ? user.name : otherId,
+                avatar: user ? user.image : `https://ui-avatars.com/api/?name=${otherId}&background=random`,
+                phone: otherId,
+                lastMessage: msg.text || 'Media',
+                time: msg.timestamp,
                 unread: 0,
-                online: false
+                isGroup: false,
+                isArchived: false
             });
         }
+
+        uniqueChats.sort((a, b) => new Date(b.time) - new Date(a.time));
         res.status(200).json(uniqueChats);
+
     } catch (err) {
         console.error("Error in getUserChats:", err);
         res.status(500).json({ error: err.message });
@@ -333,7 +445,29 @@ io.on('connection', (socket) => {
         }
     });
 
+    socket.on('create_group', async (groupData) => {
+        console.log('Creating Group:', groupData.name);
+        try {
+            const safeId = String(groupData.id);
+            await db.run(
+                "INSERT INTO groups_table (id, name, icon, createdBy, admins) VALUES (?, ?, ?, ?, ?)",
+                [safeId, groupData.name, groupData.avatar, groupData.createdBy, JSON.stringify(groupData.admins || [])]
+            );
+
+            // Members: Ensure we handle array of objects {id, isAdmin}
+            // groupData.members usually matches structure from frontend
+            for (const m of groupData.members) {
+                await db.run("INSERT INTO group_members (groupId, userId, role) VALUES (?, ?, ?)",
+                    [safeId, m.id, m.isAdmin ? 'admin' : 'member']);
+
+                // Notify Member
+                io.to(m.id).emit('new_group_created', groupData);
+            }
+        } catch (e) {
+            console.error('Group Create Error:', e);
+        }
+    });
+
     socket.on('disconnect', () => { });
 });
-
 
