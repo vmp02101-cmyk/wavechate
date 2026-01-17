@@ -282,7 +282,7 @@ app.get('/api/chats/:userId', async (req, res) => {
             const myCleanId = clean(userId);
             const otherId = cleanParts.find(id => id !== myCleanId);
 
-            if (!otherId) continue;
+            if (!otherId || otherId === 'null' || otherId === 'undefined' || otherId.length < 10) continue;
 
             seenChats.add(normCid);
 
@@ -494,3 +494,4 @@ io.on('connection', (socket) => {
 
     socket.on('disconnect', () => { });
 });
+
