@@ -367,213 +367,231 @@ io.on('connection', (socket) => {
                     });
                 })
                 .catch(e => console.error("Auto-join error", e));
+
+            // Auto-join Groups Created by User (Fix for Legacy Groups)
+            db.all("SELECT id FROM groups_table WHERE createdBy = ? OR createdBy = ?", [userId, normalized])
+                .then(groups => {
+                    groups.forEach(g => {
+                        socket.join(g.id);
+                        console.log(`✅ [DEBUG] Auto-Joined Created Group: ${g.id}`);
+                    });
+                }).catch(e => { });
+
         } catch (e) { }
-    });
 
-    socket.on('send_message', async (data) => {
-        const { chatId, sender, text, type, mediaUrl } = data;
+        socket.on('send_message', async (data) => {
+            const { chatId, sender, text, type, mediaUrl } = data;
 
-        console.log(`📨 [DEBUG] New Message from ${sender} in ${chatId}`);
+            console.log(`📨 [DEBUG] New Message from ${sender} in ${chatId}`);
 
-        if (!chatId || !sender) {
-            console.error('❌ [DEBUG] Message rejected: Missing chatId or sender');
-            return;
-        }
+            if (!chatId || !sender) {
+                console.error('❌ [DEBUG] Message rejected: Missing chatId or sender');
+                return;
+            }
 
-        const clean = (id) => id.toString().replace(/\D/g, '').slice(-10);
-        // Ensure chatId is a string to prevent crashes
-        const safeChatId = String(chatId);
-        const normChatId = safeChatId.split('_').map(clean).sort().join('_');
+            const clean = (id) => id.toString().replace(/\D/g, '').slice(-10);
+            // Ensure chatId is a string to prevent crashes
+            const safeChatId = String(chatId);
+            const normChatId = safeChatId.split('_').map(clean).sort().join('_');
 
-        try {
-            const result = await db.run(
-                "INSERT INTO messages (chatId, sender, text, type, mediaUrl) VALUES (?, ?, ?, ?, ?)",
-                [normChatId, sender, text || null, type || 'text', mediaUrl || null]
-            );
+            try {
+                const result = await db.run(
+                    "INSERT INTO messages (chatId, sender, text, type, mediaUrl) VALUES (?, ?, ?, ?, ?)",
+                    [normChatId, sender, text || null, type || 'text', mediaUrl || null]
+                );
 
-            const newMessage = {
-                id: result.lastID,
-                ...data,
-                chatId: normChatId,
-                timestamp: new Date().toISOString()
-            };
+                const newMessage = {
+                    id: result.lastID,
+                    ...data,
+                    chatId: normChatId,
+                    timestamp: new Date().toISOString()
+                };
 
-            const parts = safeChatId.split('_');
-            if (parts.length === 2) {
-                const normParts = parts.map(clean);
-                const normReceiver = normParts.find(p => p !== clean(sender));
+                const parts = safeChatId.split('_');
+                if (parts.length === 2) {
+                    const normParts = parts.map(clean);
+                    const normReceiver = normParts.find(p => p !== clean(sender));
 
-                console.log(`🚀 Dispatching Msg to: ${normChatId} AND Receiver: ${normReceiver}`);
+                    console.log(`🚀 Dispatching Msg to: ${normChatId} AND Receiver: ${normReceiver}`);
 
-                // Emit to rooms
-                io.to(safeChatId).emit('receive_message', newMessage);
-                io.to(`${parts[1]}_${parts[0]}`).emit('receive_message', newMessage);
-                if (normReceiver) io.to(normReceiver).emit('receive_message', newMessage);
-                io.to(clean(sender)).emit('receive_message', newMessage); // Sync sender
-            } else {
-                // GROUP CHAT BROADCAST
+                    // Emit to rooms
+                    io.to(safeChatId).emit('receive_message', newMessage);
+                    io.to(`${parts[1]}_${parts[0]}`).emit('receive_message', newMessage);
+                    if (normReceiver) io.to(normReceiver).emit('receive_message', newMessage);
+                    io.to(clean(sender)).emit('receive_message', newMessage); // Sync sender
+                } else {
+                    // GROUP CHAT BROADCAST
 
-                // Permission Check for Private Groups
-                try {
-                    const groupInfo = await db.get("SELECT type FROM groups_table WHERE id = ?", [safeChatId]);
-                    if (groupInfo && groupInfo.type === 'private') {
-                        const member = await db.get("SELECT role FROM group_members WHERE groupId = ? AND userId = ?", [safeChatId, clean(sender)]);
-                        if (!member || member.role !== 'admin') {
-                            console.log(`⛔ Blocked message from non-admin ${sender} in Private Group ${safeChatId}`);
-                            return;
+                    // Permission Check for Private Groups
+                    try {
+                        const groupInfo = await db.get("SELECT type, createdBy FROM groups_table WHERE id = ?", [safeChatId]);
+
+                        // Legacy Fix: Ensure Creator gets message even if not in members
+                        if (groupInfo && groupInfo.createdBy) {
+                            const cleanCreator = clean(groupInfo.createdBy);
+                            io.to(groupInfo.createdBy).emit('receive_message', newMessage);
+                            io.to(cleanCreator).emit('receive_message', newMessage);
                         }
-                    }
-                } catch (e) { console.error("Permission check failed", e); }
 
-                console.log(`🚀 Dispatching Group Msg to: ${safeChatId}`);
-                io.to(safeChatId).emit('receive_message', newMessage);
+                        if (groupInfo && groupInfo.type === 'private') {
+                            const member = await db.get("SELECT role FROM group_members WHERE groupId = ? AND userId = ?", [safeChatId, clean(sender)]);
+                            if (!member || member.role !== 'admin') {
+                                console.log(`⛔ Blocked message from non-admin ${sender} in Private Group ${safeChatId}`);
+                                return;
+                            }
+                        }
+                    } catch (e) { console.error("Permission check failed", e); }
 
-                // Redundant Direct Emit to members (Reliability)
-                // Redundant Direct Emit to members (Reliability)
-                try {
-                    const members = await db.all("SELECT userId FROM group_members WHERE groupId = ?", [safeChatId]);
-                    const clean = (id) => String(id).replace(/\D/g, '').slice(-10);
+                    console.log(`🚀 Dispatching Group Msg to: ${safeChatId}`);
+                    io.to(safeChatId).emit('receive_message', newMessage);
 
-                    members.forEach(m => {
-                        // Emit to both Raw and Clean ID to ensure delivery
-                        io.to(m.userId).emit('receive_message', newMessage);
-                        io.to(clean(m.userId)).emit('receive_message', newMessage);
-                    });
-                } catch (e) { console.error("Group dispatch error", e); }
-            }
-        } catch (err) {
-            console.error('❌ Insert Error:', err);
-        }
-    });
+                    // Redundant Direct Emit to members (Reliability)
+                    // Redundant Direct Emit to members (Reliability)
+                    try {
+                        const members = await db.all("SELECT userId FROM group_members WHERE groupId = ?", [safeChatId]);
+                        const clean = (id) => String(id).replace(/\D/g, '').slice(-10);
 
-    // Status Logic
-    app.post('/api/status', async (req, res) => {
-        const { userId, userName, type, content, bgColor, mediaUrl } = req.body;
-        const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
-        try {
-            const result = await db.run(
-                "INSERT INTO status (userId, userName, type, content, bgColor, mediaUrl, expiresAt) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                [userId, userName, type, content, bgColor, mediaUrl, expiresAt]
-            );
-            const newStatus = {
-                id: result.lastID,
-                userId, userName, type, content, bgColor, mediaUrl, expiresAt,
-                timestamp: new Date().toISOString()
-            };
-            io.emit('new_status', newStatus);
-            res.status(200).json({ success: true, status: newStatus });
-        } catch (err) {
-            res.status(500).json({ error: err.message });
-        }
-    });
-
-    // Get Status
-    app.get('/api/status', async (req, res) => {
-        try {
-            const rows = await db.all("SELECT * FROM status WHERE expiresAt > CURRENT_TIMESTAMP ORDER BY timestamp DESC");
-            res.status(200).json(rows);
-        } catch (err) {
-            res.status(500).json({ error: err.message });
-        }
-    });
-
-    socket.on('create_group', async (groupData) => {
-        console.log('Creating Group:', groupData.name);
-        try {
-            const safeId = String(groupData.id);
-            await db.run(
-                "INSERT INTO groups_table (id, name, icon, createdBy, admins, type) VALUES (?, ?, ?, ?, ?, ?)",
-                [safeId, groupData.name, groupData.avatar, groupData.createdBy, JSON.stringify(groupData.admins || []), groupData.type || 'public']
-            );
-
-            // Members: Ensure we handle array of objects {id, isAdmin}
-            const clean = (id) => String(id).replace(/\D/g, '').slice(-10);
-
-            for (const m of groupData.members) {
-                const cleanMemberId = clean(m.id);
-                await db.run("INSERT INTO group_members (groupId, userId, role) VALUES (?, ?, ?)",
-                    [safeId, cleanMemberId, m.isAdmin ? 'admin' : 'member']);
-
-                // Notify Member (Emit to both Clean and Raw if possible, Clean is safest)
-                io.to(cleanMemberId).emit('new_group_created', groupData);
-            }
-
-            // Explicitly Add Creator as Admin Member
-            if (groupData.createdBy) {
-                const creatorId = clean(groupData.createdBy);
-                // Check if already processed
-                const alreadyAdded = groupData.members.find(m => clean(m.id) === creatorId);
-                if (!alreadyAdded) {
-                    await db.run("INSERT INTO group_members (groupId, userId, role) VALUES (?, ?, ?)",
-                        [safeId, creatorId, 'admin']);
+                        members.forEach(m => {
+                            // Emit to both Raw and Clean ID to ensure delivery
+                            io.to(m.userId).emit('receive_message', newMessage);
+                            io.to(clean(m.userId)).emit('receive_message', newMessage);
+                        });
+                    } catch (e) { console.error("Group dispatch error", e); }
                 }
+            } catch (err) {
+                console.error('❌ Insert Error:', err);
             }
-        } catch (e) {
-            console.error('Group Create Error:', e);
-        }
-    });
-
-    // --- CALL SIGNALING (Zego Cloud Compatible) ---
-    socket.on('call_user', (data) => {
-        // Frontend sends: { callerId, receiverId, channelId, type }
-        const { callerId, receiverId, channelId, type } = data;
-        const cleanTo = String(receiverId).replace(/\D/g, '').slice(-10);
-        console.log(`📞 Call Request from ${callerId} to ${cleanTo} (Chan: ${channelId})`);
-
-        // Emit exactly what Frontend expects in listenToIncomingCalls
-        io.to(cleanTo).emit('incoming_call', {
-            callerId,
-            channelId,
-            type
         });
-    });
 
-    socket.on('answer_call', (data) => {
-        // Not used heavily in Zego flow (usually handled by Zego SDK events), 
-        // but kept for custom signaling if needed
-    });
+        // Status Logic
+        app.post('/api/status', async (req, res) => {
+            const { userId, userName, type, content, bgColor, mediaUrl } = req.body;
+            const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+            try {
+                const result = await db.run(
+                    "INSERT INTO status (userId, userName, type, content, bgColor, mediaUrl, expiresAt) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    [userId, userName, type, content, bgColor, mediaUrl, expiresAt]
+                );
+                const newStatus = {
+                    id: result.lastID,
+                    userId, userName, type, content, bgColor, mediaUrl, expiresAt,
+                    timestamp: new Date().toISOString()
+                };
+                io.emit('new_status', newStatus);
+                res.status(200).json({ success: true, status: newStatus });
+            } catch (err) {
+                res.status(500).json({ error: err.message });
+            }
+        });
 
-    socket.on('reject_call', (data) => {
-        // Frontend emits { callerId } (the person who CALLED)
-        const { callerId } = data;
-        const cleanTo = String(callerId).replace(/\D/g, '').slice(-10);
-        io.to(cleanTo).emit('call_rejected');
-    });
+        // Get Status
+        app.get('/api/status', async (req, res) => {
+            try {
+                const rows = await db.all("SELECT * FROM status WHERE expiresAt > CURRENT_TIMESTAMP ORDER BY timestamp DESC");
+                res.status(200).json(rows);
+            } catch (err) {
+                res.status(500).json({ error: err.message });
+            }
+        });
 
-    socket.on('end_call', (data) => {
-        const { receiverId } = data;
-        const cleanTo = String(receiverId).replace(/\D/g, '').slice(-10);
-        io.to(cleanTo).emit('call_ended');
-    });
+        socket.on('create_group', async (groupData) => {
+            console.log('Creating Group:', groupData.name);
+            try {
+                const safeId = String(groupData.id);
+                await db.run(
+                    "INSERT INTO groups_table (id, name, icon, createdBy, admins, type) VALUES (?, ?, ?, ?, ?, ?)",
+                    [safeId, groupData.name, groupData.avatar, groupData.createdBy, JSON.stringify(groupData.admins || []), groupData.type || 'public']
+                );
 
-    // --- GROUP CALL SIGNALING ---
-    socket.on('group_call', async (data) => {
-        const { groupId, signalData, from, name } = data;
-        const cleanFrom = String(from).replace(/\D/g, '').slice(-10);
-        console.log(`📞 Group Call Started in ${groupId} by ${from}`);
+                // Members: Ensure we handle array of objects {id, isAdmin}
+                const clean = (id) => String(id).replace(/\D/g, '').slice(-10);
 
-        try {
-            const members = await db.all("SELECT userId FROM group_members WHERE groupId = ?", [String(groupId)]);
-            const clean = (id) => String(id).replace(/\D/g, '').slice(-10);
+                for (const m of groupData.members) {
+                    const cleanMemberId = clean(m.id);
+                    await db.run("INSERT INTO group_members (groupId, userId, role) VALUES (?, ?, ?)",
+                        [safeId, cleanMemberId, m.isAdmin ? 'admin' : 'member']);
 
-            members.forEach(m => {
-                const mClean = clean(m.userId);
-                if (mClean !== cleanFrom) {
-                    io.to(mClean).emit('incoming_call', {
-                        signal: signalData,
-                        from,
-                        name,
-                        isGroupCall: true,
-                        groupId
-                    });
+                    // Notify Member (Emit to both Clean and Raw if possible, Clean is safest)
+                    io.to(cleanMemberId).emit('new_group_created', groupData);
                 }
+
+                // Explicitly Add Creator as Admin Member
+                if (groupData.createdBy) {
+                    const creatorId = clean(groupData.createdBy);
+                    // Check if already processed
+                    const alreadyAdded = groupData.members.find(m => clean(m.id) === creatorId);
+                    if (!alreadyAdded) {
+                        await db.run("INSERT INTO group_members (groupId, userId, role) VALUES (?, ?, ?)",
+                            [safeId, creatorId, 'admin']);
+                    }
+                }
+            } catch (e) {
+                console.error('Group Create Error:', e);
+            }
+        });
+
+        // --- CALL SIGNALING (Zego Cloud Compatible) ---
+        socket.on('call_user', (data) => {
+            // Frontend sends: { callerId, receiverId, channelId, type }
+            const { callerId, receiverId, channelId, type } = data;
+            const cleanTo = String(receiverId).replace(/\D/g, '').slice(-10);
+            console.log(`📞 Call Request from ${callerId} to ${cleanTo} (Chan: ${channelId})`);
+
+            // Emit exactly what Frontend expects in listenToIncomingCalls
+            io.to(cleanTo).emit('incoming_call', {
+                callerId,
+                channelId,
+                type
             });
-        } catch (e) { console.error("Group call error", e); }
+        });
+
+        socket.on('answer_call', (data) => {
+            // Not used heavily in Zego flow (usually handled by Zego SDK events), 
+            // but kept for custom signaling if needed
+        });
+
+        socket.on('reject_call', (data) => {
+            // Frontend emits { callerId } (the person who CALLED)
+            const { callerId } = data;
+            const cleanTo = String(callerId).replace(/\D/g, '').slice(-10);
+            io.to(cleanTo).emit('call_rejected');
+        });
+
+        socket.on('end_call', (data) => {
+            const { receiverId } = data;
+            const cleanTo = String(receiverId).replace(/\D/g, '').slice(-10);
+            io.to(cleanTo).emit('call_ended');
+        });
+
+        // --- GROUP CALL SIGNALING ---
+        socket.on('group_call', async (data) => {
+            const { groupId, signalData, from, name } = data;
+            const cleanFrom = String(from).replace(/\D/g, '').slice(-10);
+            console.log(`📞 Group Call Started in ${groupId} by ${from}`);
+
+            try {
+                const members = await db.all("SELECT userId FROM group_members WHERE groupId = ?", [String(groupId)]);
+                const clean = (id) => String(id).replace(/\D/g, '').slice(-10);
+
+                members.forEach(m => {
+                    const mClean = clean(m.userId);
+                    if (mClean !== cleanFrom) {
+                        io.to(mClean).emit('incoming_call', {
+                            signal: signalData,
+                            from,
+                            name,
+                            isGroupCall: true,
+                            groupId
+                        });
+                    }
+                });
+            } catch (e) { console.error("Group call error", e); }
+        });
+
+        socket.on('disconnect', () => { });
     });
 
-    socket.on('disconnect', () => { });
-});
-;
+
 
 
 
