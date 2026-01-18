@@ -444,18 +444,36 @@ io.on('connection', (socket) => {
                 } catch (e) { console.error("Permission check failed", e); }
 
                 console.log(`🚀 Dispatching Group Msg to: ${safeChatId}`);
-                io.to(safeChatId).emit('receive_message', newMessage);
-
-                // Redundant Direct Emit to members (Reliability)
                 // Redundant Direct Emit to members (Reliability)
                 try {
                     const members = await db.all("SELECT userId FROM group_members WHERE groupId = ?", [safeChatId]);
                     const clean = (id) => String(id).replace(/\D/g, '').slice(-10);
 
+                    // Helper to safely emit
+                    const safeEmit = (targetId) => {
+                        if (!targetId) return;
+                        io.to(targetId).emit('receive_message', newMessage);
+                        const c = clean(targetId);
+                        if (c) {
+                            io.to(c).emit('receive_message', newMessage);
+                            io.to('+' + c).emit('receive_message', newMessage); // Try +Format too
+                        }
+                    };
+
+                    // 1. Emit to GROUP ROOM
+                    io.to(safeChatId).emit('receive_message', newMessage);
+
+                    // 2. Emit to SENDER (Sync)
+                    safeEmit(sender);
+
+                    // 3. Emit to CREATOR (Legacy Fix)
+                    if (groupInfo && groupInfo.createdBy) {
+                        safeEmit(groupInfo.createdBy);
+                    }
+
+                    // 4. Emit to MEMBERS
                     members.forEach(m => {
-                        // Emit to both Raw and Clean ID to ensure delivery
-                        io.to(m.userId).emit('receive_message', newMessage);
-                        io.to(clean(m.userId)).emit('receive_message', newMessage);
+                        safeEmit(m.userId);
                     });
                 } catch (e) { console.error("Group dispatch error", e); }
             }
@@ -591,6 +609,7 @@ io.on('connection', (socket) => {
 
     socket.on('disconnect', () => { });
 });
+
 
 
 
