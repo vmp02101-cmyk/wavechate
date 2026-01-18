@@ -164,6 +164,43 @@ async function createTables(db) {
             joinedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
     `);
+
+    // --- STATUS INTERACTIONS ---
+    // Views
+    await db.exec(`
+        CREATE TABLE IF NOT EXISTS status_views (
+            id ${primaryKey},
+            statusId VARCHAR(255),
+            userId VARCHAR(255),
+            userName TEXT,
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(statusId, userId)
+        );
+    `);
+
+    // Likes
+    await db.exec(`
+        CREATE TABLE IF NOT EXISTS status_likes (
+            id ${primaryKey},
+            statusId VARCHAR(255),
+            userId VARCHAR(255),
+            userName TEXT,
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(statusId, userId)
+        );
+    `);
+
+    // Comments
+    await db.exec(`
+        CREATE TABLE IF NOT EXISTS status_comments (
+            id ${primaryKey},
+            statusId VARCHAR(255),
+            userId VARCHAR(255),
+            userName TEXT,
+            content TEXT,
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+    `);
 }
 
 module.exports = { initDB, getDB: () => pool ? new MySQLWrapper(pool) : require('sqlite').open() };
