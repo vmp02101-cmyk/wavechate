@@ -659,6 +659,45 @@ io.on('connection', (socket) => {
         }
     });
 
+    // --- STATUS INTERACTIONS APIs ---
+    app.post('/api/status/:id/view', async (req, res) => {
+        try {
+            const { userId, userName } = req.body;
+            await db.run("INSERT OR IGNORE INTO status_views (statusId, userId, userName, timestamp) VALUES (?, ?, ?, CURRENT_TIMESTAMP)", [req.params.id, userId, userName]);
+            // Notify Sender? (Maybe in future, for now just store)
+            // But we should emit to sender if connected?
+            io.emit('status_viewed', { statusId: req.params.id, userId });
+            res.json({ success: true });
+        } catch (e) { res.status(500).json({ error: e.message }); }
+    });
+
+    app.post('/api/status/:id/like', async (req, res) => {
+        try {
+            const { userId, userName } = req.body;
+            await db.run("INSERT OR IGNORE INTO status_likes (statusId, userId, userName, timestamp) VALUES (?, ?, ?, CURRENT_TIMESTAMP)", [req.params.id, userId, userName]);
+            io.emit('status_liked', { statusId: req.params.id, userId, userName });
+            res.json({ success: true });
+        } catch (e) { res.status(500).json({ error: e.message }); }
+    });
+
+    app.post('/api/status/:id/comment', async (req, res) => {
+        try {
+            const { userId, userName, content } = req.body;
+            await db.run("INSERT INTO status_comments (statusId, userId, userName, content, timestamp) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)", [req.params.id, userId, userName, content]);
+            io.emit('status_commented', { statusId: req.params.id, userId, userName, content });
+            res.json({ success: true });
+        } catch (e) { res.status(500).json({ error: e.message }); }
+    });
+
+    app.get('/api/status/:id/interactions', async (req, res) => {
+        try {
+            const views = await db.all("SELECT * FROM status_views WHERE statusId = ?", [req.params.id]);
+            const likes = await db.all("SELECT * FROM status_likes WHERE statusId = ?", [req.params.id]);
+            const comments = await db.all("SELECT * FROM status_comments WHERE statusId = ?", [req.params.id]);
+            res.json({ views, likes, comments });
+        } catch (e) { res.status(500).json({ error: e.message }); }
+    });
+
     // --- CALL SIGNALING (Zego Cloud Compatible) ---
     socket.on('call_user', (data) => {
         // Frontend sends: { callerId, receiverId, channelId, type }
@@ -743,9 +782,6 @@ io.on('connection', (socket) => {
 
     socket.on('disconnect', () => { });
 });
-
-
-
 
 
 
