@@ -610,6 +610,54 @@ io.on('connection', (socket) => {
         }
     });
 
+    // --- STATUS UPDATES LOGIC ---
+
+    // Create Status Table
+    db.run(`CREATE TABLE IF NOT EXISTS status_table (
+        id TEXT PRIMARY KEY,
+        userId TEXT,
+        userName TEXT,
+        avatar TEXT,
+        type TEXT,
+        content TEXT,
+        caption TEXT,
+        timestamp TEXT,
+        expiresAt INTEGER
+    )`);
+
+    app.get('/api/status', async (req, res) => {
+        try {
+            const now = Date.now();
+            // Delete expired statuses first (lazy cleanup)
+            await db.run("DELETE FROM status_table WHERE expiresAt < ?", [now]);
+
+            const statuses = await db.all("SELECT * FROM status_table ORDER BY timestamp DESC");
+            res.json(statuses);
+        } catch (e) { res.status(500).json([]); }
+    });
+
+    app.post('/api/status', async (req, res) => {
+        try {
+            const { userId, userName, avatar, type, content, caption } = req.body;
+            const id = 'status-' + Date.now();
+            const timestamp = new Date().toISOString();
+            const expiresAt = Date.now() + (24 * 60 * 60 * 1000); // 24 Hours
+
+            await db.run(
+                "INSERT INTO status_table (id, userId, userName, avatar, type, content, caption, timestamp, expiresAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                [id, userId, userName, avatar, type, content, caption || '', timestamp, expiresAt]
+            );
+
+            const newStatus = { id, userId, userName, avatar, type, content, caption, timestamp };
+            io.emit('new_status', newStatus); // Broadcast to all (Client filters by contact)
+
+            res.json({ success: true });
+        } catch (e) {
+            console.error(e);
+            res.status(500).json({ error: "Failed" });
+        }
+    });
+
     // --- CALL SIGNALING (Zego Cloud Compatible) ---
     socket.on('call_user', (data) => {
         // Frontend sends: { callerId, receiverId, channelId, type }
@@ -683,6 +731,4 @@ io.on('connection', (socket) => {
 
     socket.on('disconnect', () => { });
 });
-
-
 
