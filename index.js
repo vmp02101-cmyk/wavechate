@@ -4,13 +4,8 @@ const path = require('path');
 const { Server } = require('socket.io');
 const cors = require('cors');
 const multer = require('multer');
-const multler = require('multer');
 const { initDB, getDB } = require('./db');
-const axios = require('axios'); // Required for OTP
 require('dotenv').config();
-
-const FAST2SMS_API_KEY = process.env.FAST2SMS_API_KEY || "YOUR_TEST_KEY_IF_NEEDED";
-const otpStore = new Map();
 
 const app = express();
 
@@ -101,7 +96,7 @@ app.post('/api/otp/send', async (req, res) => {
         return res.status(400).json({ error: "Invalid phone number" });
     }
 
-    // Generate 6 digit OTP
+    // Generate 6 digit OTP (or fixed)
     const otp = Math.floor(100000 + Math.random() * 900000);
 
     // Store OTP (Expires in 5 mins)
@@ -112,32 +107,14 @@ app.post('/api/otp/send', async (req, res) => {
 
     console.log(`🔒 Generated OTP for ${number}: ${otp}`);
 
-    // Call Fast2SMS API
-    try {
-        const response = await axios.post('https://www.fast2sms.com/dev/bulkV2', {
-            "route": "v3",
-            "sender_id": "TXTIND",
-            "message": `Your WaveChat Verification Code is: ${otp}`,
-            "language": "english",
-            "flash": 0,
-            "numbers": number,
-        }, {
-            headers: { "authorization": FAST2SMS_API_KEY }
-        });
-
-        if (response.data.return) {
-            console.log("✅ SMS Sent Successfully");
-            res.json({ success: true, message: "OTP Sent" });
-        } else {
-            console.error("❌ Fast2SMS Error:", response.data);
-            // Fallback for testing if SMS fails (Remove in production)
-            res.json({ success: true, message: "Use Test OTP: " + otp, isTest: true });
-        }
-    } catch (error) {
-        console.error("❌ SMS Network/API Error:", error.message);
-        // CRITICAL FALLBACK: Allow login even if SMS fails
-        res.json({ success: true, message: "SMS Failed. Use Test OTP: " + otp, debugOtp: otp });
-    }
+    // SIMULATED OTP (No Fast2SMS)
+    // Ensures login always works without external keys/errors
+    res.json({
+        success: true,
+        message: "OTP Sent (Simulated). Code: " + otp,
+        isTest: true,
+        debugOtp: otp
+    });
 });
 
 // Verify OTP
@@ -602,6 +579,7 @@ io.on('connection', (socket) => {
 
     socket.on('disconnect', () => { });
 });
+
 
 
 
