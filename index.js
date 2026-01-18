@@ -660,12 +660,16 @@ io.on('connection', (socket) => {
     });
 
     // --- STATUS INTERACTIONS APIs ---
+    // --- STATUS INTERACTIONS APIs ---
     app.post('/api/status/:id/view', async (req, res) => {
         try {
             const { userId, userName } = req.body;
-            await db.run("INSERT OR IGNORE INTO status_views (statusId, userId, userName, timestamp) VALUES (?, ?, ?, CURRENT_TIMESTAMP)", [req.params.id, userId, userName]);
-            // Notify Sender? (Maybe in future, for now just store)
-            // But we should emit to sender if connected?
+            const isMySQL = db.constructor.name === 'MySQLWrapper';
+            const query = isMySQL
+                ? "INSERT IGNORE INTO status_views (statusId, userId, userName, timestamp) VALUES (?, ?, ?, CURRENT_TIMESTAMP)"
+                : "INSERT OR IGNORE INTO status_views (statusId, userId, userName, timestamp) VALUES (?, ?, ?, CURRENT_TIMESTAMP)";
+
+            await db.run(query, [req.params.id, userId, userName]);
             io.emit('status_viewed', { statusId: req.params.id, userId });
             res.json({ success: true });
         } catch (e) { res.status(500).json({ error: e.message }); }
@@ -674,7 +678,12 @@ io.on('connection', (socket) => {
     app.post('/api/status/:id/like', async (req, res) => {
         try {
             const { userId, userName } = req.body;
-            await db.run("INSERT OR IGNORE INTO status_likes (statusId, userId, userName, timestamp) VALUES (?, ?, ?, CURRENT_TIMESTAMP)", [req.params.id, userId, userName]);
+            const isMySQL = db.constructor.name === 'MySQLWrapper';
+            const query = isMySQL
+                ? "INSERT IGNORE INTO status_likes (statusId, userId, userName, timestamp) VALUES (?, ?, ?, CURRENT_TIMESTAMP)"
+                : "INSERT OR IGNORE INTO status_likes (statusId, userId, userName, timestamp) VALUES (?, ?, ?, CURRENT_TIMESTAMP)";
+
+            await db.run(query, [req.params.id, userId, userName]);
             io.emit('status_liked', { statusId: req.params.id, userId, userName });
             res.json({ success: true });
         } catch (e) { res.status(500).json({ error: e.message }); }
@@ -782,6 +791,7 @@ io.on('connection', (socket) => {
 
     socket.on('disconnect', () => { });
 });
+
 
 
 
