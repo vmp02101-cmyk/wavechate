@@ -432,6 +432,10 @@ io.on('connection', (socket) => {
             } else {
                 // GROUP CHAT BROADCAST
 
+                // FORCE JOIN (Failsafe)
+                socket.join(safeChatId);
+                console.log(`✅ [DEBUG] Socket forced to join group room: ${safeChatId}`);
+
                 // Permission Check for Private Groups
                 try {
                     const groupInfo = await db.get("SELECT type, createdBy FROM groups_table WHERE id = ?", [safeChatId]);
@@ -616,6 +620,7 @@ io.on('connection', (socket) => {
 
     socket.on('disconnect', () => { });
 });
+
 
 
 
