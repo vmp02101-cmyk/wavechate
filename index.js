@@ -237,7 +237,8 @@ app.get('/api/chats/:userId', async (req, res) => {
                     unread: 0,
                     avatar: g.icon,
                     createdBy: g.createdBy,
-                    admins: JSON.parse(g.admins || '[]')
+                    admins: JSON.parse(g.admins || '[]'),
+                    type: g.type // Fix: Pass group type (public/private) to frontend
                 });
             }
         } catch (e) {
@@ -632,7 +633,6 @@ io.on('connection', (socket) => {
 
     socket.on('disconnect', () => { });
 });
-
 
 
 
