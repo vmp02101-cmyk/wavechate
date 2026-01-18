@@ -394,7 +394,15 @@ io.on('connection', (socket) => {
         const clean = (id) => id.toString().replace(/\D/g, '').slice(-10);
         // Ensure chatId is a string to prevent crashes
         const safeChatId = String(chatId);
-        const normChatId = safeChatId.split('_').map(clean).sort().join('_');
+
+        let normChatId;
+        // Private Chat (Phone_Phone) -> Normalization (Clean & Sort)
+        if (safeChatId.includes('_')) {
+            normChatId = safeChatId.split('_').map(clean).sort().join('_');
+        } else {
+            // Group Chat -> Keep Original ID (Don't slice timestamps!)
+            normChatId = safeChatId;
+        }
 
         try {
             const result = await db.run(
