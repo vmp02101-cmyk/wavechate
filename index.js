@@ -692,11 +692,22 @@ io.on('connection', (socket) => {
         io.to(cleanTo).emit('call_ended');
     });
 
+    // --- GROUP MESSAGES ENDPOINT (Missing Fix) ---
+    app.get('/api/groups/:id/messages', async (req, res) => {
+        try {
+            const messages = await db.all("SELECT * FROM messages WHERE chatId = ? ORDER BY timestamp ASC", [req.params.id]);
+            res.json(messages);
+        } catch (e) {
+            res.status(500).json({ error: e.message });
+        }
+    });
+
     // --- GROUP CALL SIGNALING ---
     socket.on('group_call', async (data) => {
-        const { groupId, signalData, from, name } = data;
-        const cleanFrom = String(from).replace(/\D/g, '').slice(-10);
-        console.log(`📞 Group Call Started in ${groupId} by ${from}`);
+        const { groupId, signalData, from, callerId, name } = data;
+        const senderId = from || callerId; // Robust Fallback
+        const cleanFrom = String(senderId).replace(/\D/g, '').slice(-10);
+        console.log(`📞 Group Call Started in ${groupId} by ${senderId}`);
 
         try {
             const members = await db.all("SELECT userId FROM group_members WHERE groupId = ?", [String(groupId)]);
