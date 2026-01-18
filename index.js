@@ -445,34 +445,32 @@ io.on('connection', (socket) => {
                 } catch (e) { console.error("Permission check failed", e); }
 
                 console.log(`🚀 Dispatching Group Msg to: ${safeChatId}`);
-                // Redundant Direct Emit to members (Reliability)
+
+                // Helper to safely emit
+                const safeEmit = (targetId) => {
+                    if (!targetId) return;
+                    io.to(String(targetId)).emit('receive_message', newMessage); // Force String
+                    const c = clean(targetId);
+                    if (c) {
+                        io.to(c).emit('receive_message', newMessage);
+                        io.to('+' + c).emit('receive_message', newMessage);
+                    }
+                };
+
+                // 1. Emit to GROUP ROOM (Always)
+                io.to(safeChatId).emit('receive_message', newMessage);
+
+                // 2. Emit to SENDER (Sync - Always)
+                safeEmit(sender);
+
+                // 3. Emit to CREATOR (Legacy Fix)
+                if (groupInfo && groupInfo.createdBy) {
+                    safeEmit(groupInfo.createdBy);
+                }
+
+                // 4. Emit to MEMBERS (Try-Catch)
                 try {
                     const members = await db.all("SELECT userId FROM group_members WHERE groupId = ?", [safeChatId]);
-                    const clean = (id) => String(id).replace(/\D/g, '').slice(-10);
-
-                    // Helper to safely emit
-                    const safeEmit = (targetId) => {
-                        if (!targetId) return;
-                        io.to(targetId).emit('receive_message', newMessage);
-                        const c = clean(targetId);
-                        if (c) {
-                            io.to(c).emit('receive_message', newMessage);
-                            io.to('+' + c).emit('receive_message', newMessage); // Try +Format too
-                        }
-                    };
-
-                    // 1. Emit to GROUP ROOM
-                    io.to(safeChatId).emit('receive_message', newMessage);
-
-                    // 2. Emit to SENDER (Sync)
-                    safeEmit(sender);
-
-                    // 3. Emit to CREATOR (Legacy Fix)
-                    if (groupInfo && groupInfo.createdBy) {
-                        safeEmit(groupInfo.createdBy);
-                    }
-
-                    // 4. Emit to MEMBERS
                     members.forEach(m => {
                         safeEmit(m.userId);
                     });
@@ -610,6 +608,7 @@ io.on('connection', (socket) => {
 
     socket.on('disconnect', () => { });
 });
+
 
 
 
