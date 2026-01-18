@@ -269,7 +269,8 @@ app.get('/api/chats/:userId', async (req, res) => {
 
             if (seenChats.has(normCid)) continue;
 
-            const myCleanId = clean(userId);
+            // Fix: userId doesn't exist, use cleanId
+            const myCleanId = cleanId;
             const otherId = cleanParts.find(id => id !== myCleanId);
 
             if (!otherId || otherId === 'null' || otherId === 'undefined' || otherId.length < 10) continue;
