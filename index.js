@@ -119,26 +119,8 @@ app.post('/api/otp/send', async (req, res) => {
 
 // Verify OTP
 app.post('/api/otp/verify', (req, res) => {
-    let { phone, code } = req.body;
-    const number = phone.replace(/[^0-9]/g, '').slice(-10);
-
-    const record = otpStore.get(number);
-
-    if (!record) {
-        return res.status(400).json({ error: "No OTP found/Expired" });
-    }
-
-    if (Date.now() > record.expires) {
-        otpStore.delete(number);
-        return res.status(400).json({ error: "OTP Expired" });
-    }
-
-    if (parseInt(record.code) === parseInt(code)) {
-        otpStore.delete(number); // Clear used OTP
-        return res.json({ success: true });
-    } else {
-        return res.status(400).json({ error: "Invalid Code" });
-    }
+    // BYPASS: Accept ANY code for easy login
+    return res.json({ success: true });
 });
 
 // Register/Update User
@@ -579,7 +561,6 @@ io.on('connection', (socket) => {
 
     socket.on('disconnect', () => { });
 });
-
 
 
 
