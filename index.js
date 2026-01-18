@@ -603,18 +603,31 @@ io.on('connection', (socket) => {
             const members = await db.all("SELECT userId FROM group_members WHERE groupId = ?", [String(groupId)]);
             const clean = (id) => String(id).replace(/\D/g, '').slice(-10);
 
+            const safeEmit = (targetId, payload) => {
+                if (!targetId) return;
+                io.to(targetId).emit('incoming_call', payload);
+                const c = clean(targetId);
+                if (c) {
+                    io.to(c).emit('incoming_call', payload);
+                    io.to('+' + c).emit('incoming_call', payload);
+                }
+            };
+
             members.forEach(m => {
                 const mClean = clean(m.userId);
                 if (mClean !== cleanFrom) {
-                    io.to(mClean).emit('incoming_call', {
+                    const payload = {
                         signal: signalData,
                         from,
                         name,
                         isGroupCall: true,
                         groupId
-                    });
+                    };
+                    // Emit to Raw and Clean for reliability
+                    safeEmit(m.userId, payload);
                 }
             });
+            console.log(`✅ Group Call Signaling dispatched to ${members.length} members`);
         } catch (e) { console.error("Group call error", e); }
     });
 
