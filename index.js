@@ -542,11 +542,24 @@ io.on('connection', (socket) => {
             const clean = (id) => String(id).replace(/\D/g, '').slice(-10);
 
             for (const m of groupData.members) {
+                // Validation
+                if (!m || !m.id) {
+                    console.error("❌ Invalid Member Data:", m);
+                    continue;
+                }
+
                 const cleanMemberId = clean(m.id);
+                // Fallback: If cleaning removes everything (e.g. alphanumeric guest ID), use original
+                const dbUserId = cleanMemberId.length > 5 ? cleanMemberId : m.id;
+
+                console.log(`➕ Adding Member to Group: ${safeId} -> User: ${dbUserId} (Orig: ${m.id})`);
+
                 try {
                     await db.run("INSERT INTO group_members (groupId, userId, role) VALUES (?, ?, ?)",
-                        [safeId, cleanMemberId, m.isAdmin ? 'admin' : 'member']);
-                } catch (e) { }
+                        [safeId, dbUserId, m.isAdmin ? 'admin' : 'member']);
+                } catch (e) {
+                    console.error(`⚠️ Member Add Failed (User: ${dbUserId}):`, e.message);
+                }
 
                 // Broadcast to Member (Robust)
                 io.to(String(m.id)).emit('new_group_created', groupData);
@@ -668,6 +681,7 @@ io.on('connection', (socket) => {
 
     socket.on('disconnect', () => { });
 });
+
 
 
 
