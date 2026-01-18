@@ -224,8 +224,13 @@ app.get('/api/chats/:userId', async (req, res) => {
                 // Get Last Message for Group
                 const lastMsg = await db.get("SELECT * FROM messages WHERE chatId = ? ORDER BY timestamp DESC LIMIT 1", [g.id]);
 
-                // Get Members (Optional for list, but useful)
-                const members = await db.all("SELECT userId as id, role FROM group_members WHERE groupId = ?", [g.id]);
+                // Get Members with Names
+                const members = await db.all(`
+                    SELECT gm.userId as id, gm.role, u.name 
+                    FROM group_members gm 
+                    LEFT JOIN users u ON gm.userId = u.phone 
+                    WHERE gm.groupId = ?
+                `, [g.id]);
 
                 uniqueChats.push({
                     id: g.id,
@@ -538,11 +543,17 @@ io.on('connection', (socket) => {
 
             for (const m of groupData.members) {
                 const cleanMemberId = clean(m.id);
-                await db.run("INSERT INTO group_members (groupId, userId, role) VALUES (?, ?, ?)",
-                    [safeId, cleanMemberId, m.isAdmin ? 'admin' : 'member']);
+                try {
+                    await db.run("INSERT INTO group_members (groupId, userId, role) VALUES (?, ?, ?)",
+                        [safeId, cleanMemberId, m.isAdmin ? 'admin' : 'member']);
+                } catch (e) { }
 
-                // Notify Member (Emit to both Clean and Raw if possible, Clean is safest)
-                io.to(cleanMemberId).emit('new_group_created', groupData);
+                // Broadcast to Member (Robust)
+                io.to(String(m.id)).emit('new_group_created', groupData);
+                if (cleanMemberId) {
+                    io.to(cleanMemberId).emit('new_group_created', groupData);
+                    io.to('+' + cleanMemberId).emit('new_group_created', groupData);
+                }
             }
 
             // Explicitly Add Creator as Admin Member
@@ -633,6 +644,7 @@ io.on('connection', (socket) => {
 
     socket.on('disconnect', () => { });
 });
+
 
 
 
