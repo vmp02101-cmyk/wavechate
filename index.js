@@ -571,6 +571,30 @@ io.on('connection', (socket) => {
         }
     });
 
+    // Get Single Group Info (For Fresh Permissions)
+    app.get('/api/groups/:id', async (req, res) => {
+        try {
+            const group = await db.get("SELECT * FROM groups_table WHERE id = ?", [req.params.id]);
+            if (!group) return res.status(404).json({ error: "Group not found" });
+
+            // Get Members
+            const members = await db.all(`
+                SELECT gm.userId as id, gm.role, u.name 
+                FROM group_members gm 
+                LEFT JOIN users u ON gm.userId = u.phone 
+                WHERE gm.groupId = ?
+            `, [req.params.id]);
+
+            res.json({
+                ...group,
+                members: members,
+                admins: JSON.parse(group.admins || '[]')
+            });
+        } catch (e) {
+            res.status(500).json({ error: e.message });
+        }
+    });
+
     // --- CALL SIGNALING (Zego Cloud Compatible) ---
     socket.on('call_user', (data) => {
         // Frontend sends: { callerId, receiverId, channelId, type }
@@ -644,6 +668,8 @@ io.on('connection', (socket) => {
 
     socket.on('disconnect', () => { });
 });
+
+
 
 
 
