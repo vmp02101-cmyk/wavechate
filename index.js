@@ -513,25 +513,37 @@ io.on('connection', (socket) => {
         }
     });
 
-    // --- CALL SIGNALING ---
+    // --- CALL SIGNALING (Zego Cloud Compatible) ---
     socket.on('call_user', (data) => {
-        const { userToCall, signalData, from, name } = data;
-        const cleanTo = userToCall.toString().replace(/\D/g, '').slice(-10);
-        console.log(`📞 Call Request from ${from} to ${cleanTo}`);
-        io.to(cleanTo).emit('incoming_call', { signal: signalData, from, name });
+        // Frontend sends: { callerId, receiverId, channelId, type }
+        const { callerId, receiverId, channelId, type } = data;
+        const cleanTo = String(receiverId).replace(/\D/g, '').slice(-10);
+        console.log(`📞 Call Request from ${callerId} to ${cleanTo} (Chan: ${channelId})`);
+
+        // Emit exactly what Frontend expects in listenToIncomingCalls
+        io.to(cleanTo).emit('incoming_call', {
+            callerId,
+            channelId,
+            type
+        });
     });
 
     socket.on('answer_call', (data) => {
-        const { to, signal } = data;
-        const cleanTo = to.toString().replace(/\D/g, '').slice(-10);
-        console.log(`📞 Call Answered by ${cleanTo}`);
-        io.to(cleanTo).emit('call_accepted', signal);
+        // Not used heavily in Zego flow (usually handled by Zego SDK events), 
+        // but kept for custom signaling if needed
     });
 
     socket.on('reject_call', (data) => {
-        const { to } = data;
-        const cleanTo = to.toString().replace(/\D/g, '').slice(-10);
+        // Frontend emits { callerId } (the person who CALLED)
+        const { callerId } = data;
+        const cleanTo = String(callerId).replace(/\D/g, '').slice(-10);
         io.to(cleanTo).emit('call_rejected');
+    });
+
+    socket.on('end_call', (data) => {
+        const { receiverId } = data;
+        const cleanTo = String(receiverId).replace(/\D/g, '').slice(-10);
+        io.to(cleanTo).emit('call_ended');
     });
 
     // --- GROUP CALL SIGNALING ---
@@ -561,6 +573,8 @@ io.on('connection', (socket) => {
 
     socket.on('disconnect', () => { });
 });
+;
+
 
 
 
