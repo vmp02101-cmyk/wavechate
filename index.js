@@ -666,12 +666,12 @@ io.on('connection', (socket) => {
         const cleanTo = String(receiverId).replace(/\D/g, '').slice(-10);
         console.log(`📞 Call Request from ${callerId} to ${cleanTo} (Chan: ${channelId})`);
 
-        // Emit exactly what Frontend expects in listenToIncomingCalls
-        io.to(cleanTo).emit('incoming_call', {
-            callerId,
-            channelId,
-            type
-        });
+        // Emit to ALL potential room formats for reliability
+        const payload = { callerId, channelId, type };
+
+        io.to(cleanTo).emit('incoming_call', payload);
+        if (receiverId) io.to(receiverId).emit('incoming_call', payload);
+        io.to('+' + cleanTo).emit('incoming_call', payload);
     });
 
     socket.on('answer_call', (data) => {
@@ -743,6 +743,8 @@ io.on('connection', (socket) => {
 
     socket.on('disconnect', () => { });
 });
+
+
 
 
 
