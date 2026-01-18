@@ -4,8 +4,13 @@ const path = require('path');
 const { Server } = require('socket.io');
 const cors = require('cors');
 const multer = require('multer');
+const multler = require('multer');
 const { initDB, getDB } = require('./db');
+const axios = require('axios'); // Required for OTP
 require('dotenv').config();
+
+const FAST2SMS_API_KEY = process.env.FAST2SMS_API_KEY || "YOUR_TEST_KEY_IF_NEEDED";
+const otpStore = new Map();
 
 const app = express();
 
@@ -129,8 +134,9 @@ app.post('/api/otp/send', async (req, res) => {
             res.json({ success: true, message: "Use Test OTP: " + otp, isTest: true });
         }
     } catch (error) {
-        console.error("❌ SMS Network Error:", error.message);
-        res.status(500).json({ error: "Failed to send SMS" });
+        console.error("❌ SMS Network/API Error:", error.message);
+        // CRITICAL FALLBACK: Allow login even if SMS fails
+        res.json({ success: true, message: "SMS Failed. Use Test OTP: " + otp, debugOtp: otp });
     }
 });
 
@@ -596,5 +602,6 @@ io.on('connection', (socket) => {
 
     socket.on('disconnect', () => { });
 });
+
 
 
