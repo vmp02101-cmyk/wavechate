@@ -316,8 +316,7 @@ const storage = new CloudinaryStorage({
     cloudinary: cloudinary,
     params: {
         folder: 'wavechat_media',
-        allowed_formats: ['jpg', 'png', 'jpeg', 'mp4', 'webm', 'wav', 'mp3', 'mov', 'avi', 'mkv', 'pdf', 'doc', 'docx'],
-        resource_type: 'auto' // Important for video/audio
+        resource_type: 'auto' // Allow all formats (Images, Video, Audio, Raw)
     }
 });
 
