@@ -214,101 +214,101 @@ app.get('/api/chats/:userId', async (req, res) => {
         // 1. FETCH GROUPS (Robust Query with Fallbacks)
         console.log(`🔍 fetching groups for: ${JSON.stringify(possibleIds)}`);
 
-        // Use explicit OR Logic for maximum compatibility
-        const groups = await db.all(
-            `SELECT DISTINCT g.* FROM groups_table g 
-             JOIN group_members gm ON g.id = gm.groupId 
-             WHERE gm.userId LIKE ? OR gm.userId LIKE ? OR gm.userId = ?`,
-            [`%${cleanId}`, `%${cleanId}%`, rawUserId]
-        );
-        console.log(`✅ Found ${groups.length} groups for user ${cleanId}`);
+        try {
+            const groups = await db.all(
+                `SELECT DISTINCT g.* FROM groups_table g 
+                 JOIN group_members gm ON g.id = gm.groupId 
+                 WHERE gm.userId LIKE ? OR gm.userId LIKE ? OR gm.userId = ?`,
+                [`%${cleanId}`, `%${cleanId}%`, rawUserId]
+            );
+            console.log(`✅ Found ${groups.length} groups for user ${cleanId}`);
 
-        for (const g of groups) {
-            // Get Last Message for Group
-            const lastMsg = await db.get("SELECT * FROM messages WHERE chatId = ? ORDER BY timestamp DESC LIMIT 1", [g.id]);
+            for (const g of groups) {
+                // Get Last Message for Group
+                const lastMsg = await db.get("SELECT * FROM messages WHERE chatId = ? ORDER BY timestamp DESC LIMIT 1", [g.id]);
 
-            // Get Members with Names
-            const members = await db.all(`
+                // Get Members with Names
+                const members = await db.all(`
                 SELECT gm.userId as id, gm.role, u.name 
                 FROM group_members gm 
                 LEFT JOIN users u ON gm.userId = u.phone 
                 WHERE gm.groupId = ?
             `, [g.id]);
 
+                uniqueChats.push({
+                    id: g.id,
+                    name: g.name,
+                    isGroup: true,
+                    members: members.map(m => ({ id: m.id, isAdmin: m.role === 'admin' })),
+                    lastMessage: lastMsg ? (lastMsg.text || 'Media') : 'Tap to chat',
+                    time: lastMsg ? lastMsg.timestamp : (g.createdAt || new Date().toISOString()),
+                    unread: 0,
+                    avatar: g.icon,
+                    createdBy: g.createdBy,
+                    admins: JSON.parse(g.admins || '[]'),
+                    type: g.type // Fix: Pass group type (public/private) to frontend
+                });
+            }
+        } catch (e) {
+            console.error("Error fetching groups:", e);
+            // Continue to private chats even if groups fail
+        }
+
+        // 2. FETCH PRIVATE CHATS
+        const rawMessages = await db.all("SELECT * FROM messages WHERE chatId LIKE ?", [`%${cleanId}%`]);
+        const seenChats = new Set();
+
+        // Add existing groups to seen to avoid duplication if msg logic overlaps (unlikely)
+        uniqueChats.forEach(c => seenChats.add(c.id));
+
+        rawMessages.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+        // clean function hoisted to top
+
+        for (const msg of rawMessages) {
+            if (!msg.chatId) continue;
+
+            // If it's a group ID (no _ separator usually, or different format), stick to private logic
+            // Private chats strictly defined as containing userId
+            // Filter out group messages here if mixed?
+            // Assuming private chat is A_B format.
+            if (!String(msg.chatId).includes('_')) continue; // Skip groups
+
+            const cleanParts = String(msg.chatId).split('_').map(clean).sort();
+            const normCid = cleanParts.join('_');
+
+            if (seenChats.has(normCid)) continue;
+
+            // Fix: userId doesn't exist, use cleanId
+            const myCleanId = cleanId;
+            const otherId = cleanParts.find(id => id !== myCleanId);
+
+            if (!otherId || otherId === 'null' || otherId === 'undefined' || otherId.length < 10) continue;
+
+            seenChats.add(normCid);
+
+            // Fetch user
+            const user = await db.get("SELECT name, image FROM users WHERE phone LIKE ?", [`%${otherId}`]);
+
             uniqueChats.push({
-                id: g.id,
-                name: g.name,
-                isGroup: true,
-                members: members.map(m => ({ id: m.id, isAdmin: m.role === 'admin' })),
-                lastMessage: lastMsg ? (lastMsg.text || 'Media') : 'Tap to chat',
-                time: lastMsg ? lastMsg.timestamp : (g.createdAt || new Date().toISOString()),
+                id: normCid, // Map chatId to id
+                name: user ? user.name : otherId,
+                avatar: user ? user.image : `https://ui-avatars.com/api/?name=${otherId}&background=random`,
+                phone: otherId,
+                lastMessage: msg.text || 'Media',
+                time: msg.timestamp,
                 unread: 0,
-                avatar: g.icon,
-                createdBy: g.createdBy,
-                admins: JSON.parse(g.admins || '[]'),
-                type: g.type // Fix: Pass group type (public/private) to frontend
+                isGroup: false,
+                isArchived: false
             });
         }
-    } catch (e) {
-        console.error("Error fetching groups:", e);
-        // Continue to private chats even if groups fail
+
+        uniqueChats.sort((a, b) => new Date(b.time) - new Date(a.time));
+        res.status(200).json(uniqueChats);
+
+    } catch (err) {
+        console.error("Error in getUserChats:", err);
+        res.status(500).json({ error: err.message });
     }
-
-    // 2. FETCH PRIVATE CHATS
-    const rawMessages = await db.all("SELECT * FROM messages WHERE chatId LIKE ?", [`%${cleanId}%`]);
-    const seenChats = new Set();
-
-    // Add existing groups to seen to avoid duplication if msg logic overlaps (unlikely)
-    uniqueChats.forEach(c => seenChats.add(c.id));
-
-    rawMessages.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-    // clean function hoisted to top
-
-    for (const msg of rawMessages) {
-        if (!msg.chatId) continue;
-
-        // If it's a group ID (no _ separator usually, or different format), stick to private logic
-        // Private chats strictly defined as containing userId
-        // Filter out group messages here if mixed?
-        // Assuming private chat is A_B format.
-        if (!String(msg.chatId).includes('_')) continue; // Skip groups
-
-        const cleanParts = String(msg.chatId).split('_').map(clean).sort();
-        const normCid = cleanParts.join('_');
-
-        if (seenChats.has(normCid)) continue;
-
-        // Fix: userId doesn't exist, use cleanId
-        const myCleanId = cleanId;
-        const otherId = cleanParts.find(id => id !== myCleanId);
-
-        if (!otherId || otherId === 'null' || otherId === 'undefined' || otherId.length < 10) continue;
-
-        seenChats.add(normCid);
-
-        // Fetch user
-        const user = await db.get("SELECT name, image FROM users WHERE phone LIKE ?", [`%${otherId}`]);
-
-        uniqueChats.push({
-            id: normCid, // Map chatId to id
-            name: user ? user.name : otherId,
-            avatar: user ? user.image : `https://ui-avatars.com/api/?name=${otherId}&background=random`,
-            phone: otherId,
-            lastMessage: msg.text || 'Media',
-            time: msg.timestamp,
-            unread: 0,
-            isGroup: false,
-            isArchived: false
-        });
-    }
-
-    uniqueChats.sort((a, b) => new Date(b.time) - new Date(a.time));
-    res.status(200).json(uniqueChats);
-
-} catch (err) {
-    console.error("Error in getUserChats:", err);
-    res.status(500).json({ error: err.message });
-}
 });
 
 // --- CLOUDINARY CONFIG ---
