@@ -1,3 +1,11 @@
+
+
+
+
+
+
+
+
 const express = require('express');
 const http = require('http');
 const path = require('path');
@@ -212,13 +220,15 @@ app.get('/api/chats/:userId', async (req, res) => {
         const uniqueChats = [];
 
         // 1. FETCH GROUPS (Robust Query)
+        console.log(`🔍 fetching groups for: ${placeholders} -> ${possibleIds}`);
         try {
             const groups = await db.all(
                 `SELECT DISTINCT g.* FROM groups_table g 
-                 JOIN group_members gm ON g.id = gm.groupId 
-                 WHERE gm.userId IN (${placeholders})`,
+                     JOIN group_members gm ON g.id = gm.groupId 
+                     WHERE gm.userId IN (${placeholders})`,
                 possibleIds
             );
+            console.log(`✅ Found ${groups.length} groups for user.`);
 
             for (const g of groups) {
                 // Get Last Message for Group
@@ -681,10 +691,4 @@ io.on('connection', (socket) => {
 
     socket.on('disconnect', () => { });
 });
-
-
-
-
-
-
 
